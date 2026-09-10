@@ -1,0 +1,30 @@
+# ---------------------------------------------------------------------------
+# Secrets / identifiants — NE JAMAIS COMMITTER
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+.env.local/
+*.env
+secrets.*
+*connection*string*
+*.pgpass
+
+# Ancienne API PHP archivée (non déployée sur GitHub Pages)
+archive/
+*.php
+*.php.bak
+
+# Dépendances / outils
+node_modules/
+package-lock.json
+scratchpad/
+
+# OS / éditeurs
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*~
+.vscode/
+.idea/

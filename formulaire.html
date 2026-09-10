@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>Saisie terrain — Parcelles Gbêkê</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"/>
+<script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js" integrity="sha256-0A8+j/io+cED2tYcL9S7WBQ+FASq398J4pttsaLeCj8=" crossorigin=""></script>
+
+<style>
+  :root {
+    --ink: #1f2a24;
+    --paper: #f7f6f2;
+    --line: #d8d4c8;
+    --green-ok: #4a7c59;
+    --red-warn: #b5533c;
+    --accent: #2f5233;
+    --amber: #b8860b;
+    --shadow-panel: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; padding:0; height:100%; font-family:"Segoe UI",-apple-system,sans-serif; background:var(--paper); color:var(--ink); }
+  #app { display:flex; flex-direction:column; height:100%; }
+  header {
+    padding: 10px 16px; background: var(--accent); color:#fff;
+    display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap;
+  }
+  header h1 { font-size: 0.98rem; margin:0; font-weight:700; letter-spacing:.01em; }
+  header .sub { font-size:.72rem; opacity:.85; }
+  #layout { position:relative; flex:1; min-height:0; display:flex; }
+  #map { position:absolute; top:0; left:0; right:0; bottom:0; }
+
+  /* ---------- Barre d'outils flottante sur la carte ---------- */
+  #map-toolbar {
+    position:absolute; z-index:1000; top:10px; left:10px; right:10px;
+    display:flex; gap:6px; flex-wrap:wrap;
+  }
+  .tbtn {
+    background:#fff; border:1px solid var(--line); border-radius:8px;
+    padding:9px 12px; font-size:.78rem; font-weight:700; font-family:inherit;
+    color:var(--ink); cursor:pointer; box-shadow:var(--shadow-panel);
+    display:flex; align-items:center; gap:6px; white-space:nowrap;
+  }
+  .tbtn:hover { background:#f0efe9; }
+  .tbtn.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .tbtn.primary:hover { background:#26401f; }
+  .tbtn.warn { background:var(--red-warn); color:#fff; border-color:var(--red-warn); }
+  .tbtn:disabled { opacity:.45; cursor:not-allowed; }
+
+  #gps-status {
+    position:absolute; z-index:1000; bottom:10px; left:10px;
+    background:#fff; border:1px solid var(--line); border-radius:8px;
+    padding:6px 10px; font-size:.72rem; box-shadow:var(--shadow-panel); max-width:260px; display:none;
+  }
+  #gps-status.show { display:block; }
+  #gps-status .ok { color:var(--green-ok); font-weight:700; }
+  #gps-status .bad { color:var(--red-warn); font-weight:700; }
+
+  #toast {
+    position:absolute; z-index:2000; top:60px; left:50%; transform:translateX(-50%);
+    background:#1f2a24; color:#fff; padding:10px 18px; border-radius:8px;
+    font-size:.82rem; box-shadow:var(--shadow-panel); display:none; max-width:90%; text-align:center;
+  }
+  #toast.show { display:block; }
+  #toast.err { background: var(--red-warn); }
+
+  /* ---------- Panneau latéral (formulaire / liste / sync) ---------- */
+  #side {
+    width: 380px; flex-shrink:0; background:#fff; border-left:1px solid var(--line);
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  #tabs { display:flex; border-bottom:1px solid var(--line); flex-shrink:0; }
+  .tab-btn {
+    flex:1; border:none; background:transparent; padding:12px 6px; font:inherit;
+    font-size:.78rem; font-weight:700; color:#6b6f68; cursor:pointer; border-bottom:3px solid transparent;
+  }
+  .tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+  .tab-panel { display:none; flex:1; overflow-y:auto; padding:14px 16px; }
+  .tab-panel.active { display:block; }
+
+  .field { margin-bottom:12px; }
+  .field label { display:block; font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.03em; opacity:.65; margin-bottom:4px; }
+  .field input, .field select, .field textarea {
+    width:100%; font:inherit; font-size:.88rem; padding:8px 10px; border:1px solid var(--line);
+    border-radius:6px; background:var(--paper); color:var(--ink);
+  }
+  .field input:focus, .field select:focus, .field textarea:focus { outline:2px solid var(--accent); outline-offset:1px; }
+  .field textarea { resize:vertical; min-height:60px; }
+  .field-row { display:flex; gap:10px; }
+  .field-row .field { flex:1; }
+  .field .hint { font-size:.68rem; opacity:.6; margin-top:3px; }
+  .required-mark { color:var(--red-warn); }
+
+  #geom-status {
+    border:1px dashed var(--line); border-radius:8px; padding:10px 12px; margin-bottom:14px;
+    font-size:.8rem; background:var(--paper);
+  }
+  #geom-status.done { border-color: var(--green-ok); background:#eef5ee; }
+  #geom-status.none { border-color: var(--red-warn); background:#fbeeea; }
+
+  .form-actions { display:flex; gap:8px; margin-top:16px; position:sticky; bottom:0; background:#fff; padding-top:8px; }
+  .btn { flex:1; border:none; border-radius:7px; padding:11px; font:inherit; font-size:.85rem; font-weight:700; cursor:pointer; }
+  .btn.save { background:var(--accent); color:#fff; }
+  .btn.save:disabled { background:#a9b3a5; cursor:not-allowed; }
+  .btn.cancel { background:var(--paper); color:var(--ink); border:1px solid var(--line); }
+
+  .parcel-item {
+    border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin-bottom:8px; cursor:pointer;
+    display:flex; align-items:flex-start; gap:10px; background:#fff;
+  }
+  .parcel-item:hover { background:var(--paper); }
+  .parcel-item .dot { width:12px; height:12px; border-radius:3px; flex-shrink:0; margin-top:3px; }
+  .parcel-item .info { flex:1; min-width:0; }
+  .parcel-item .title { font-weight:700; font-size:.85rem; }
+  .parcel-item .meta { font-size:.72rem; opacity:.7; margin-top:2px; }
+  .parcel-item .badge {
+    font-size:.62rem; font-weight:700; padding:2px 6px; border-radius:4px; text-transform:uppercase;
+  }
+  .badge.synced { background:#e4f0e6; color:var(--green-ok); }
+  .badge.pending { background:#fbeee0; color:var(--amber); }
+  .parcel-item .del { background:none; border:none; color:var(--red-warn); font-size:1rem; cursor:pointer; padding:2px 6px; }
+  #empty-list { font-size:.82rem; opacity:.6; text-align:center; padding:30px 10px; }
+
+  #sync-panel .field { margin-bottom:14px; }
+  .sync-summary { display:flex; gap:10px; margin-bottom:14px; }
+  .sync-card { flex:1; border:1px solid var(--line); border-radius:8px; padding:10px; text-align:center; }
+  .sync-card .n { font-size:1.3rem; font-weight:800; color:var(--accent); }
+  .sync-card .l { font-size:.68rem; opacity:.65; text-transform:uppercase; }
+  .divider { border:none; border-top:1px solid var(--line); margin:18px 0; }
+  .file-btn { display:inline-block; }
+
+  /* ---------- Mobile : panneau en feuille inférieure ---------- */
+  #side-toggle { display:none; }
+  @media (max-width: 860px) {
+    #layout { flex-direction:column; }
+    #map-pane { flex: 1 1 42vh; min-height: 42vh; }
+    #side {
+      width:auto; border-left:none; border-top:1px solid var(--line);
+      flex: 1 1 58vh; max-height:58vh;
+    }
+    #map-toolbar { top:8px; left:8px; right:8px; }
+    .tbtn { font-size:.72rem; padding:8px 9px; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Saisie terrain — Parcelles Gbêkê</h1>
+    <div class="sub">Localiser · Numériser · Renseigner</div>
+  </header>
+  <div id="layout">
+    <div id="map-pane" style="position:relative; flex:1 1 auto; min-width:0;">
+      <div id="map"></div>
+      <div id="map-toolbar">
+        <button class="tbtn" id="btn-locate">📍 Ma position</button>
+        <button class="tbtn primary" id="btn-draw">✏️ Nouvelle parcelle</button>
+        <button class="tbtn warn" id="btn-cancel-draw" style="display:none;">✕ Annuler le tracé</button>
+      </div>
+      <div id="gps-status"></div>
+      <div id="toast"></div>
+    </div>
+
+    <div id="side">
+      <div id="tabs">
+        <button class="tab-btn active" data-tab="form">Formulaire</button>
+        <button class="tab-btn" data-tab="list">Parcelles (<span id="count-badge">0</span>)</button>
+        <button class="tab-btn" data-tab="sync">Export / Sync</button>
+      </div>
+
+      <!-- ===== Onglet Formulaire ===== -->
+      <div class="tab-panel active" id="panel-form">
+        <div id="geom-status" class="none">
+          <strong>Aucun tracé.</strong> Appuyez sur « Nouvelle parcelle », rendez-vous sur le terrain puis dessinez le contour de la parcelle sur la carte (un clic = un sommet, double-clic pour fermer).
+        </div>
+
+        <form id="parcel-form">
+          <input type="hidden" id="f-id">
+
+          <div class="field-row">
+            <div class="field">
+              <label>Culture <span class="required-mark">*</span></label>
+              <select id="f-culture" required>
+                <option value="">— Choisir —</option>
+                <option value="riz">Riz</option>
+                <option value="manioc">Manioc</option>
+                <option value="igname">Igname</option>
+                <option value="autre">Autre</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Département <span class="required-mark">*</span></label>
+              <select id="f-departement" required>
+                <option value="">— Choisir —</option>
+                <option value="Béoumi">Béoumi</option>
+                <option value="Botro">Botro</option>
+                <option value="Bouaké">Bouaké</option>
+                <option value="Sakassou">Sakassou</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Localité / village <span class="required-mark">*</span></label>
+            <input type="text" id="f-localite" list="localites-list" required placeholder="Ex. Kondrobo">
+            <datalist id="localites-list"></datalist>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>Producteur / exploitant</label>
+              <input type="text" id="f-producteur" placeholder="Nom complet">
+            </div>
+            <div class="field">
+              <label>Téléphone</label>
+              <input type="tel" id="f-telephone" placeholder="07 00 00 00 00">
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>Superficie (ha) <span class="required-mark">*</span></label>
+              <input type="number" id="f-surface" step="0.01" min="0" required>
+              <div class="hint">Calculée automatiquement depuis le tracé — modifiable.</div>
+            </div>
+            <div class="field">
+              <label>Stade de la culture</label>
+              <select id="f-stade">
+                <option value="">—</option>
+                <option value="preparation">Préparation du sol</option>
+                <option value="semis">Semis / plantation</option>
+                <option value="croissance">Croissance</option>
+                <option value="floraison">Floraison</option>
+                <option value="recolte">Récolte</option>
+                <option value="jachere">Jachère</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>Rendement estimé (t/ha)</label>
+              <input type="number" id="f-rendement" step="0.01" min="0">
+            </div>
+            <div class="field">
+              <label>Production estimée (t)</label>
+              <input type="number" id="f-production" step="0.01" min="0">
+              <div class="hint">= superficie × rendement (auto, modifiable).</div>
+            </div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label>Date de plantation</label>
+              <input type="date" id="f-date-plantation">
+            </div>
+            <div class="field">
+              <label>Date de collecte</label>
+              <input type="date" id="f-date-collecte" required>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Agent enquêteur <span class="required-mark">*</span></label>
+            <input type="text" id="f-agent" required placeholder="Nom de l'agent">
+          </div>
+
+          <div class="field">
+            <label>Photo (optionnelle)</label>
+            <input type="file" id="f-photo" accept="image/*" capture="environment">
+            <div class="hint" id="photo-hint"></div>
+          </div>
+
+          <div class="field">
+            <label>Notes / observations</label>
+            <textarea id="f-notes" placeholder="Remarques de terrain…"></textarea>
+          </div>
+
+          <div class="form-actions">
+            <button type="button" class="btn cancel" id="btn-cancel-form">Effacer</button>
+            <button type="submit" class="btn save" id="btn-save" disabled>Enregistrer la parcelle</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- ===== Onglet Liste ===== -->
+      <div class="tab-panel" id="panel-list">
+        <div id="parcel-list"></div>
+        <div id="empty-list" style="display:none;">Aucune parcelle enregistrée pour l'instant.</div>
+      </div>
+
+      <!-- ===== Onglet Export / Sync ===== -->
+      <div class="tab-panel" id="panel-sync">
+        <div class="sync-summary">
+          <div class="sync-card"><div class="n" id="sync-total">0</div><div class="l">Total</div></div>
+          <div class="sync-card"><div class="n" id="sync-pending">0</div><div class="l">En attente</div></div>
+          <div class="sync-card"><div class="n" id="sync-synced">0</div><div class="l">Synchronisées</div></div>
+        </div>
+
+        <div class="field">
+          <label>Exporter</label>
+          <button type="button" class="tbtn primary" id="btn-export" style="width:100%; justify-content:center;">⬇ Télécharger le GeoJSON</button>
+          <div class="hint">Contient toutes les parcelles enregistrées sur cet appareil.</div>
+        </div>
+
+        <div class="field">
+          <label>Importer un GeoJSON</label>
+          <input type="file" id="f-import" accept=".geojson,.json,application/geo+json,application/json">
+          <div class="hint">Fusionne avec les parcelles déjà enregistrées (même identifiant = mise à jour).</div>
+        </div>
+
+        <hr class="divider">
+
+        <div class="field">
+          <label>Synchronisation</label>
+          <div class="hint">Les parcelles « en attente » sont envoyées à la base Supabase du projet
+          (fonction <code>enregistrer_parcelle</code>). Le nom et le téléphone du producteur sont
+          transmis et enregistrés, mais ne sont jamais exposés sur la carte publique.</div>
+        </div>
+        <button type="button" class="tbtn primary" id="btn-sync" style="width:100%; justify-content:center;">⇅ Synchroniser maintenant</button>
+        <div class="hint" id="sync-status" style="margin-top:8px;"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ==========================================================================
+   Saisie terrain des parcelles — Gbêkê
+   - Géolocalisation GPS (bouton "Ma position")
+   - Numérisation du contour de la parcelle (Leaflet.Draw)
+   - Formulaire de saisie / mise à jour des attributs
+   - Stockage local (localStorage) : fonctionne hors-ligne une fois la carte
+     chargée (seul le fond de carte nécessite une connexion)
+   - Export / import GeoJSON + synchronisation vers Supabase
+     (fonction RPC "enregistrer_parcelle" — voir schema_parcelles.sql et
+     supabase_rls_policies.sql pour la base PostgreSQL/PostGIS correspondante)
+   ========================================================================== */
+
+const STORAGE_KEY = 'gbeke_parcelles_terrain_v1';
+const AGENT_KEY = 'gbeke_agent_nom';
+
+// --- API Supabase (remplace l'ancienne API PHP api/parcelles.php) ---------
+// Clé publique "anon" : n'autorise que la lecture des vues publiques et
+// l'appel de la fonction enregistrer_parcelle() (cf. supabase_rls_policies.sql).
+const SUPABASE_URL = 'https://lbvuzomkpiveefnbuwlp.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_WCNcNcvxjLSbPO2VQUudDw_Kd5H1N0b';
+const RPC_ENREGISTRER_PARCELLE = SUPABASE_URL + '/rest/v1/rpc/enregistrer_parcelle';
+
+const CULTURE_COLORS = { riz:'#2f9e44', manioc:'#e8590c', igname:'#9c36b5', autre:'#495057' };
+
+const CONNUES = {
+  'Béoumi': ['Kondrobo','Lolobo','Zone rurale test 1','Zone rurale test 2'],
+  'Botro': ["N'Guessankro",'Krofoinsou','Diabo','Zone rurale test 3'],
+  'Bouaké': ['Mamini','Brobo','Bounda',"N'Djébonouan",'Zone rurale test 4','Zone rurale test 5'],
+  'Sakassou': ['Ando-Kékrénou','Ayaou-Sran','Toumodi-Sakassou','Dibri-Asrikro','Zone rurale test 6']
+};
+
+// ---------------------------------------------------------------- Carte ---
+const map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([7.69, -5.03], 8);
+// Fond gris clair sans labels — Esri "World Light Gray Base". Aucune clé API requise
+// (l'ancien fond CARTO light_nolabels renvoie désormais des tuiles filigranées « API KEY REQUIRED »).
+// Esri : ordre {z}/{y}/{x}, pas de sous-domaines {s}. Tuiles natives jusqu'au zoom 16 ;
+// au-delà, Leaflet ré-échantillonne la tuile z16 (maxNativeZoom) au lieu d'afficher du gris.
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+  attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+  maxNativeZoom: 16, maxZoom: 20
+}).addTo(map);
+map.createPane('labelsPane');
+map.getPane('labelsPane').style.zIndex = 650;
+map.getPane('labelsPane').style.pointerEvents = 'none';
+// Labels seuls (routes/localités) — Esri "World Light Gray Reference", couche transparente dans labelsPane.
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+  pane: 'labelsPane', maxNativeZoom: 16, maxZoom: 20
+}).addTo(map);
+
+// Contours des 4 départements du Gbêkê (Béoumi, Botro, Bouaké, Sakassou) — repris de
+// Carte_interactive_Region_du_Gbeke_v6_fixed.html — servent de repère visuel pendant la
+// numérisation ET de cadrage automatique de la carte au chargement.
+const deptGeoJSON = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-5.206420656999967, 7.6481117890000405], [-5.233655794999947, 7.607982334000042], [-5.316090949999932, 7.621109262000061], [-5.328734765999968, 7.647388507000073], [-5.374745434999966, 7.645858734000058], [-5.380915062999975, 7.61900803900005], [-5.38604776699998, 7.616066685000021], [-5.390423923999947, 7.6156635160000405], [-5.395792751999977, 7.614026771000056], [-5.38894789099993, 7.584582337000029], [-5.426539339999977, 7.551064019000023], [-5.444109785999956, 7.4755815100000405], [-5.522747931999959, 7.465066623000041], [-5.5711678589999565, 7.447154595000029], [-5.659136012999966, 7.4327973870000505], [-5.667742760999943, 7.422134863000053], [-5.668161866999981, 7.413991808000048], [-5.67479226699993, 7.405871326000067], [-5.679566122999972, 7.402326966000032], [-5.68662672499994, 7.4004291810000495], [-5.689325851999968, 7.3928287660000365], [-5.699620969999955, 7.36479489900006], [-5.705027942999948, 7.304148075000057], [-5.656068927999968, 7.271425761000046], [-5.583486016999927, 7.271117476000029], [-5.484392327999956, 7.309545903000071], [-5.436291559999972, 7.307216281000024], [-5.396914227999957, 7.244661933000032], [-5.327548803999946, 7.244542679000062], [-5.298569341999951, 7.230490168000074], [-5.249881939999966, 7.293130438000048], [-5.205389061999938, 7.319419212000071], [-5.2066751109999245, 7.383219028000042], [-5.153332234999937, 7.451445329000023], [-5.149011454999936, 7.507781832000035], [-5.112601913999981, 7.545640232000039], [-5.100869024999952, 7.58160299900004], [-5.174723363999931, 7.619345625000051], [-5.197159283999952, 7.650550514000031], [-5.206420656999967, 7.6481117890000405]]]}, "properties": {"name": "Sakassou", "admin_level": "6", "boundary": "administrative", "source": "shapefile officiel CIGN (Dr KOUAM\u00c9 Gui-Baubin)"}}, {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-5.315657595999937, 8.112483155000064], [-5.35673757099994, 8.162000517000024], [-5.405774810999958, 8.158237022000037], [-5.396245482999973, 8.109466531000066], [-5.430162303999964, 8.101082574000031], [-5.488334108999936, 8.117044538000073], [-5.510672614999976, 8.107769683000072], [-5.57004634599997, 7.998875660000067], [-5.679977837999957, 8.001443079000069], [-5.696534221999968, 8.037842890000036], [-5.7463187679999805, 8.053778653000052], [-5.7483096429999705, 8.026294653000036], [-5.720293952999953, 7.941024653000056], [-5.764822060999961, 7.878191250000043], [-5.772356053999943, 7.8244991000000255], [-5.760573713999975, 7.7973531260000755], [-5.694431355999939, 7.751932765000049], [-5.6771836639999265, 7.693876290000048], [-5.696625327999925, 7.66705315400003], [-5.658018426999945, 7.608883647000027], [-5.695731124999952, 7.589973289000056], [-5.6750425039999755, 7.558893682000075], [-5.714591522999967, 7.527802526000073], [-5.71456643099998, 7.455258540000045], [-5.726197653999975, 7.394835499000067], [-5.699620969999955, 7.36479489900006], [-5.689325851999968, 7.3928287660000365], [-5.68662672499994, 7.4004291810000495], [-5.679566122999972, 7.402326966000032], [-5.67479226699993, 7.405871326000067], [-5.668161866999981, 7.413991808000048], [-5.667742760999943, 7.422134863000053], [-5.659136012999966, 7.4327973870000505], [-5.5711678589999565, 7.447154595000029], [-5.522747931999959, 7.465066623000041], [-5.444109785999956, 7.4755815100000405], [-5.426539339999977, 7.551064019000023], [-5.38894789099993, 7.584582337000029], [-5.395792751999977, 7.614026771000056], [-5.390423923999947, 7.6156635160000405], [-5.38604776699998, 7.616066685000021], [-5.380915062999975, 7.61900803900005], [-5.374745434999966, 7.645858734000058], [-5.392606152999974, 7.688151277000031], [-5.334081165999976, 7.752374504000045], [-5.344455122999932, 7.803696304000027], [-5.374469602999966, 7.8057985340000755], [-5.417773324999928, 7.876432753000074], [-5.375287958999934, 7.9263760580000735], [-5.367569149999952, 7.944443118000038], [-5.379249812999944, 7.979907695000065], [-5.3650298209999505, 8.055432426000039], [-5.315657595999937, 8.112483155000064]]]}, "properties": {"name": "B\u00e9oumi", "admin_level": "6", "boundary": "administrative", "source": "shapefile officiel CIGN (Dr KOUAM\u00c9 Gui-Baubin)"}}, {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-5.205389061999938, 7.319419212000071], [-5.179733012999975, 7.338897644000042], [-5.144645883999942, 7.326222360000031], [-5.115936433999934, 7.347069132000058], [-5.077663790999964, 7.342508794000025], [-5.068093530999931, 7.409980689000065], [-5.021142514999951, 7.476106586000071], [-4.928825191999977, 7.516364433000035], [-4.882455942999968, 7.573302085000023], [-4.861544154999933, 7.559918474000028], [-4.7754017619999445, 7.583502366000062], [-4.73810545799995, 7.533178293000049], [-4.688200150999933, 7.5219264830000725], [-4.660529781999969, 7.55417723100004], [-4.601791133999939, 7.58379375800007], [-4.575326269999948, 7.624781846000076], [-4.522894828999938, 7.6061179690000245], [-4.50183710999994, 7.61872231600006], [-4.518599646999974, 7.73597417600007], [-4.5386109779999515, 7.8076619750000305], [-4.56513519899994, 7.849642663000054], [-4.609939869999948, 7.885278775000074], [-4.5925378129999785, 7.9466475240000705], [-4.638792590999969, 8.000018857000043], [-4.715268125999955, 8.02575207700005], [-4.789243086999932, 8.01603308600005], [-4.928498417999947, 7.97032338300005], [-4.959837981999954, 7.991647944000022], [-5.02812176599997, 7.989597472000071], [-5.068916143999957, 7.962090413000055], [-5.09082209099995, 7.950685962000023], [-5.121614724999972, 7.85482088200007], [-5.11992786199994, 7.789803952000057], [-5.14933255699998, 7.7336398100000565], [-5.192029934999937, 7.699481883000033], [-5.196473290999961, 7.657334576000039], [-5.195901558999935, 7.651846710000029], [-5.197159283999952, 7.650550514000031], [-5.174723363999931, 7.619345625000051], [-5.100869024999952, 7.58160299900004], [-5.112601913999981, 7.545640232000039], [-5.149011454999936, 7.507781832000035], [-5.153332234999937, 7.451445329000023], [-5.2066751109999245, 7.383219028000042], [-5.205389061999938, 7.319419212000071]]]}, "properties": {"name": "Bouak\u00e9", "admin_level": "6", "boundary": "administrative", "source": "shapefile officiel CIGN (Dr KOUAM\u00c9 Gui-Baubin)"}}, {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-5.068916143999957, 7.962090413000055], [-5.088483058999941, 7.971234922000065], [-5.1492553539999335, 7.9545429840000565], [-5.202789292999967, 8.013306830000033], [-5.279987802999926, 8.067484704000037], [-5.315657595999937, 8.112483155000064], [-5.3650298209999505, 8.055432426000039], [-5.379249812999944, 7.979907695000065], [-5.367569149999952, 7.944443118000038], [-5.375287958999934, 7.9263760580000735], [-5.417773324999928, 7.876432753000074], [-5.374469602999966, 7.8057985340000755], [-5.344455122999932, 7.803696304000027], [-5.334081165999976, 7.752374504000045], [-5.392606152999974, 7.688151277000031], [-5.374745434999966, 7.645858734000058], [-5.328734765999968, 7.647388507000073], [-5.316090949999932, 7.621109262000061], [-5.233655794999947, 7.607982334000042], [-5.206420656999967, 7.6481117890000405], [-5.195901558999935, 7.651846710000029], [-5.196473290999961, 7.657334576000039], [-5.192029934999937, 7.699481883000033], [-5.14933255699998, 7.7336398100000565], [-5.11992786199994, 7.789803952000057], [-5.121614724999972, 7.85482088200007], [-5.09082209099995, 7.950685962000023], [-5.068916143999957, 7.962090413000055]]]}, "properties": {"name": "Botro", "admin_level": "6", "boundary": "administrative", "source": "shapefile officiel CIGN (Dr KOUAM\u00c9 Gui-Baubin)"}}]};
+
+const deptLayer = L.geoJSON(deptGeoJSON, {
+  style: { color: '#5b6660', weight: 1.5, fillColor: '#c9c4b4', fillOpacity: 0.10 },
+  onEachFeature: (f, layer) => layer.bindTooltip(f.properties.name, { sticky: true })
+}).addTo(map);
+
+// Cadrage initial sur l'ensemble des départements du Gbêkê (remplace le setView fixe)
+map.fitBounds(deptLayer.getBounds(), { padding: [24, 24] });
+
+// Bouton "revenir à la vue Gbêkê", sous les boutons +/- de zoom
+const HomeControl = L.Control.extend({
+  options: { position: 'topleft' },
+  onAdd: function () {
+    const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control');
+    const link = L.DomUtil.create('a', '', container);
+    link.href = '#';
+    link.title = 'Revenir à la vue Gbêkê';
+    link.innerHTML = '⌂';
+    link.style.fontSize = '16px';
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.on(link, 'click', (e) => {
+      L.DomEvent.preventDefault(e);
+      map.fitBounds(deptLayer.getBounds(), { padding: [24, 24] });
+    });
+    return container;
+  }
+});
+map.addControl(new HomeControl());
+
+// Couche des parcelles déjà enregistrées + couche d'édition (Leaflet.Draw)
+const savedLayer = L.geoJSON(null, {
+  style: f => ({ color:'#2f5233', weight:2, fillColor: CULTURE_COLORS[f.properties.culture] || '#666', fillOpacity:0.45 }),
+  onEachFeature: (f, layer) => {
+    layer.bindPopup(popupHtml(f.properties));
+    layer.on('click', () => selectForEdit(f.properties.id));
+  }
+}).addTo(map);
+
+const drawLayer = new L.FeatureGroup().addTo(map);
+const drawControl = new L.Control.Draw({
+  edit: { featureGroup: drawLayer, remove: false },
+  draw: {
+    polygon: { allowIntersection:false, showArea:true, shapeOptions:{ color:'#b5533c', weight:3 } },
+    marker:false, circle:false, circlemarker:false, rectangle:false, polyline:false
+  }
+});
+// Le contrôle Leaflet.Draw natif reste caché ; on pilote tout via nos propres
+// boutons (plus lisibles / plus gros pour une utilisation terrain sur mobile).
+map.addControl(drawControl);
+document.querySelector('.leaflet-draw.leaflet-control').style.display = 'none';
+
+let currentGeom = null; // objet {type:'Polygon', coordinates:[...]} en cours d'édition
+
+map.on(L.Draw.Event.CREATED, e => {
+  drawLayer.clearLayers();
+  drawLayer.addLayer(e.layer);
+  setGeom(e.layer.toGeoJSON().geometry);
+  document.getElementById('btn-draw').textContent = '✏️ Retracer';
+  document.getElementById('btn-cancel-draw').style.display = 'none';
+});
+map.on(L.Draw.Event.EDITED, e => {
+  e.layers.eachLayer(l => setGeom(l.toGeoJSON().geometry));
+});
+
+function setGeom(geometry) {
+  currentGeom = geometry;
+  const area_ha = turf.area({ type:'Feature', geometry, properties:{} }) / 10000;
+  document.getElementById('f-surface').value = area_ha.toFixed(2);
+  recomputeProduction();
+  const st = document.getElementById('geom-status');
+  st.className = 'done';
+  st.innerHTML = `<strong>Contour numérisé</strong> — superficie calculée ≈ ${area_ha.toFixed(2)} ha. Vous pouvez ajuster les sommets sur la carte si besoin.`;
+  updateSaveEnabled();
+}
+
+// ------------------------------------------------------- Géolocalisation --
+const gpsStatusEl = document.getElementById('gps-status');
+let gpsMarker = null, gpsCircle = null;
+
+document.getElementById('btn-locate').addEventListener('click', () => {
+  if (!navigator.geolocation) {
+    showToast("La géolocalisation n'est pas disponible sur cet appareil.", true);
+    return;
+  }
+  gpsStatusEl.className = 'show';
+  gpsStatusEl.innerHTML = 'Recherche du signal GPS…';
+  navigator.geolocation.getCurrentPosition(pos => {
+    const { latitude, longitude, accuracy } = pos.coords;
+    if (gpsMarker) map.removeLayer(gpsMarker);
+    if (gpsCircle) map.removeLayer(gpsCircle);
+    gpsMarker = L.circleMarker([latitude, longitude], { radius:7, color:'#fff', weight:2, fillColor:'#2f6fed', fillOpacity:1 }).addTo(map);
+    gpsCircle = L.circle([latitude, longitude], { radius: accuracy, color:'#2f6fed', weight:1, fillOpacity:0.08 }).addTo(map);
+    map.setView([latitude, longitude], 19);
+    gpsStatusEl.innerHTML = `<span class="ok">Position acquise</span> — précision ≈ ${Math.round(accuracy)} m`;
+    setTimeout(() => gpsStatusEl.classList.remove('show'), 4000);
+  }, err => {
+    gpsStatusEl.innerHTML = `<span class="bad">Échec GPS</span> — ${err.message}`;
+  }, { enableHighAccuracy:true, timeout:15000, maximumAge:0 });
+});
+
+// ----------------------------------------------------------- Numérisation -
+document.getElementById('btn-draw').addEventListener('click', () => {
+  drawLayer.clearLayers();
+  new L.Draw.Polygon(map, drawControl.options.draw.polygon).enable();
+  document.getElementById('btn-cancel-draw').style.display = 'inline-flex';
+  showToast('Touchez la carte pour placer chaque coin de la parcelle, puis double-touchez pour fermer le contour.');
+});
+document.getElementById('btn-cancel-draw').addEventListener('click', () => {
+  drawLayer.clearLayers();
+  currentGeom = null;
+  document.getElementById('btn-draw').textContent = '✏️ Nouvelle parcelle';
+  document.getElementById('btn-cancel-draw').style.display = 'none';
+  const st = document.getElementById('geom-status');
+  st.className = 'none';
+  st.innerHTML = '<strong>Aucun tracé.</strong> Appuyez sur « Nouvelle parcelle », rendez-vous sur le terrain puis dessinez le contour de la parcelle sur la carte (un clic = un sommet, double-clic pour fermer).';
+  updateSaveEnabled();
+});
+
+// -------------------------------------------------------------- Stockage --
+function loadAll() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; }
+  catch (e) { return []; }
+}
+function saveAll(list) { localStorage.setItem(STORAGE_KEY, JSON.stringify(list)); }
+
+function upsert(feature) {
+  const list = loadAll();
+  const idx = list.findIndex(f => f.properties.id === feature.properties.id);
+  if (idx >= 0) list[idx] = feature; else list.push(feature);
+  saveAll(list);
+  refreshMapLayer();
+  refreshList();
+  refreshSyncSummary();
+  refreshLocalitesList();
+}
+function removeById(id) {
+  const list = loadAll().filter(f => f.properties.id !== id);
+  saveAll(list);
+  refreshMapLayer();
+  refreshList();
+  refreshSyncSummary();
+}
+
+// ------------------------------------------------------------- Formulaire -
+const form = document.getElementById('parcel-form');
+const fields = ['id','culture','departement','localite','producteur','telephone','surface','stade','rendement','production','date-plantation','date-collecte','agent','notes'];
+function el(name) { return document.getElementById('f-' + name); }
+
+let photoDataUrl = null;
+document.getElementById('f-photo').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) { photoDataUrl = null; return; }
+  if (file.size > 4 * 1024 * 1024) {
+    showToast('Photo trop volumineuse (max ~4 Mo).', true);
+    e.target.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    photoDataUrl = reader.result;
+    document.getElementById('photo-hint').textContent = 'Photo attachée ✓';
+  };
+  reader.readAsDataURL(file);
+});
+
+['f-surface','f-rendement'].forEach(id => document.getElementById(id).addEventListener('input', recomputeProduction));
+function recomputeProduction() {
+  const s = parseFloat(el('surface').value);
+  const r = parseFloat(el('rendement').value);
+  if (!isNaN(s) && !isNaN(r)) el('production').value = (s * r).toFixed(2);
+}
+
+function updateSaveEnabled() {
+  const hasGeom = !!currentGeom;
+  const requiredOk = el('culture').value && el('departement').value && el('localite').value.trim() && el('agent').value.trim() && parseFloat(el('surface').value) > 0;
+  document.getElementById('btn-save').disabled = !(hasGeom && requiredOk);
+}
+form.addEventListener('input', updateSaveEnabled);
+
+document.getElementById('f-departement').addEventListener('change', refreshLocalitesList);
+function refreshLocalitesList() {
+  const dept = el('departement').value;
+  const dl = document.getElementById('localites-list');
+  dl.innerHTML = '';
+  const set = new Set(CONNUES[dept] || []);
+  loadAll().filter(f => f.properties.departement === dept).forEach(f => set.add(f.properties.localite));
+  [...set].forEach(loc => { const o = document.createElement('option'); o.value = loc; dl.appendChild(o); });
+}
+
+function resetForm(keepAgent = true) {
+  const agentVal = keepAgent ? (el('agent').value || localStorage.getItem(AGENT_KEY) || '') : '';
+  form.reset();
+  el('id').value = '';
+  el('agent').value = agentVal;
+  el('date-collecte').value = new Date().toISOString().slice(0,10);
+  photoDataUrl = null;
+  document.getElementById('photo-hint').textContent = '';
+  drawLayer.clearLayers();
+  currentGeom = null;
+  document.getElementById('btn-draw').textContent = '✏️ Nouvelle parcelle';
+  document.getElementById('btn-cancel-draw').style.display = 'none';
+  const st = document.getElementById('geom-status');
+  st.className = 'none';
+  st.innerHTML = '<strong>Aucun tracé.</strong> Appuyez sur « Nouvelle parcelle », rendez-vous sur le terrain puis dessinez le contour de la parcelle sur la carte (un clic = un sommet, double-clic pour fermer).';
+  updateSaveEnabled();
+}
+document.getElementById('btn-cancel-form').addEventListener('click', () => resetForm());
+
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  if (!currentGeom) { showToast('Numérisez d\'abord le contour de la parcelle.', true); return; }
+  const id = el('id').value || (crypto.randomUUID ? crypto.randomUUID() : 'p-' + Date.now() + '-' + Math.random().toString(16).slice(2));
+  const existing = loadAll().find(f => f.properties.id === id);
+  const feature = {
+    type: 'Feature',
+    geometry: currentGeom,
+    properties: {
+      id,
+      culture: el('culture').value,
+      departement: el('departement').value,
+      localite: el('localite').value.trim(),
+      producteur: el('producteur').value.trim(),
+      telephone: el('telephone').value.trim(),
+      surface_ha: parseFloat(el('surface').value) || 0,
+      stade_culture: el('stade').value,
+      rendement_estime_t_ha: el('rendement').value ? parseFloat(el('rendement').value) : null,
+      production_estimee_t: el('production').value ? parseFloat(el('production').value) : null,
+      date_plantation: el('date-plantation').value || null,
+      date_collecte: el('date-collecte').value || new Date().toISOString().slice(0,10),
+      agent_enqueteur: el('agent').value.trim(),
+      notes: el('notes').value.trim(),
+      photo: photoDataUrl || (existing ? existing.properties.photo : null),
+      source: 'terrain',
+      synced: false,
+      created_at: existing ? existing.properties.created_at : new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }
+  };
+  localStorage.setItem(AGENT_KEY, feature.properties.agent_enqueteur);
+  upsert(feature);
+  showToast(existing ? 'Parcelle mise à jour ✓' : 'Parcelle enregistrée ✓');
+  resetForm();
+  document.querySelector('.tab-btn[data-tab="list"]').click();
+});
+
+function selectForEdit(id) {
+  const f = loadAll().find(x => x.properties.id === id);
+  if (!f) return;
+  document.querySelector('.tab-btn[data-tab="form"]').click();
+  const p = f.properties;
+  el('id').value = p.id;
+  el('culture').value = p.culture;
+  el('departement').value = p.departement;
+  refreshLocalitesList();
+  el('localite').value = p.localite;
+  el('producteur').value = p.producteur || '';
+  el('telephone').value = p.telephone || '';
+  el('surface').value = p.surface_ha;
+  el('stade').value = p.stade_culture || '';
+  el('rendement').value = p.rendement_estime_t_ha ?? '';
+  el('production').value = p.production_estimee_t ?? '';
+  el('date-plantation').value = p.date_plantation || '';
+  el('date-collecte').value = p.date_collecte || new Date().toISOString().slice(0,10);
+  el('agent').value = p.agent_enqueteur || '';
+  el('notes').value = p.notes || '';
+  photoDataUrl = p.photo || null;
+  document.getElementById('photo-hint').textContent = photoDataUrl ? 'Photo attachée ✓' : '';
+
+  drawLayer.clearLayers();
+  const layer = L.geoJSON(f.geometry).getLayers()[0];
+  drawLayer.addLayer(layer);
+  currentGeom = f.geometry;
+  const st = document.getElementById('geom-status');
+  st.className = 'done';
+  st.innerHTML = `<strong>Parcelle existante chargée</strong> — modifiez le tracé (poignées) ou les champs, puis enregistrez.`;
+  document.getElementById('btn-draw').textContent = '✏️ Retracer';
+  updateSaveEnabled();
+  map.fitBounds(layer.getBounds(), { padding:[40,40] });
+}
+
+// ------------------------------------------------------------------ Liste -
+function popupHtml(p) {
+  return `<strong>${p.culture ? p.culture[0].toUpperCase()+p.culture.slice(1) : ''}</strong> — ${p.localite || ''}<br>
+    ${p.surface_ha ? p.surface_ha + ' ha' : ''} · ${p.departement || ''}<br>
+    <em style="opacity:.7;">Agent : ${p.agent_enqueteur || '—'} · ${p.date_collecte || ''}</em>`;
+}
+
+function refreshMapLayer() {
+  savedLayer.clearLayers();
+  savedLayer.addData({ type:'FeatureCollection', features: loadAll() });
+}
+
+function refreshList() {
+  const list = loadAll().sort((a,b) => (b.properties.updated_at||'').localeCompare(a.properties.updated_at||''));
+  const container = document.getElementById('parcel-list');
+  const empty = document.getElementById('empty-list');
+  container.innerHTML = '';
+  document.getElementById('count-badge').textContent = list.length;
+  if (!list.length) { empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  list.forEach(f => {
+    const p = f.properties;
+    const item = document.createElement('div');
+    item.className = 'parcel-item';
+    item.innerHTML = `
+      <span class="dot" style="background:${CULTURE_COLORS[p.culture] || '#666'};"></span>
+      <div class="info">
+        <div class="title">${p.localite || '(sans nom)'} — ${p.culture || ''}</div>
+        <div class="meta">${p.departement || ''} · ${p.surface_ha ?? '?'} ha · ${p.date_collecte || ''}</div>
+        <div class="meta">Agent : ${p.agent_enqueteur || '—'} &nbsp; <span class="badge ${p.synced ? 'synced' : 'pending'}">${p.synced ? 'Synchronisée' : 'En attente'}</span></div>
+      </div>
+      <button class="del" title="Supprimer" data-id="${p.id}">✕</button>
+    `;
+    item.addEventListener('click', ev => { if (!ev.target.classList.contains('del')) selectForEdit(p.id); });
+    item.querySelector('.del').addEventListener('click', ev => {
+      ev.stopPropagation();
+      if (confirm('Supprimer définitivement cette parcelle ?')) removeById(p.id);
+    });
+    container.appendChild(item);
+  });
+}
+
+// -------------------------------------------------------------- Onglets ---
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'sync') refreshSyncSummary();
+  });
+});
+
+// ------------------------------------------------------ Export / Import ---
+document.getElementById('btn-export').addEventListener('click', () => {
+  const fc = { type:'FeatureCollection', features: loadAll() };
+  const blob = new Blob([JSON.stringify(fc, null, 2)], { type:'application/geo+json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `parcelles_gbeke_${new Date().toISOString().slice(0,10)}.geojson`;
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('f-import').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+      const feats = data.type === 'FeatureCollection' ? data.features : [data];
+      const list = loadAll();
+      let added = 0, updated = 0;
+      feats.forEach(f => {
+        if (!f.properties || !f.properties.id) f.properties = { ...(f.properties||{}), id: crypto.randomUUID ? crypto.randomUUID() : 'imp-'+Date.now()+Math.random() };
+        const idx = list.findIndex(x => x.properties.id === f.properties.id);
+        if (idx >= 0) { list[idx] = f; updated++; } else { list.push(f); added++; }
+      });
+      saveAll(list);
+      refreshMapLayer(); refreshList(); refreshSyncSummary(); refreshLocalitesList();
+      showToast(`Import terminé : ${added} ajoutée(s), ${updated} mise(s) à jour.`);
+    } catch (err) {
+      showToast('Fichier GeoJSON invalide : ' + err.message, true);
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+// ------------------------------------------------------- Sync Supabase ----
+function refreshSyncSummary() {
+  const list = loadAll();
+  document.getElementById('sync-total').textContent = list.length;
+  document.getElementById('sync-synced').textContent = list.filter(f => f.properties.synced).length;
+  document.getElementById('sync-pending').textContent = list.filter(f => !f.properties.synced).length;
+}
+
+// Envoie chaque parcelle « en attente » à la fonction RPC Supabase
+// enregistrer_parcelle(feature jsonb) — insertion, ou mise à jour si l'id existe déjà.
+document.getElementById('btn-sync').addEventListener('click', async () => {
+  const statusEl = document.getElementById('sync-status');
+  const list = loadAll();
+  const pending = list.filter(f => !f.properties.synced);
+  if (!pending.length) { statusEl.textContent = 'Rien à synchroniser — tout est déjà à jour.'; return; }
+  statusEl.textContent = `Synchronisation de ${pending.length} parcelle(s) vers Supabase…`;
+  let ok = 0, fail = 0;
+  const erreurs = [];
+  for (const f of pending) {
+    try {
+      // La photo est stockée en base64 côté appareil : on ne l'envoie pas dans la
+      // requête (le schéma n'attend qu'une URL http). Le reste de la Feature est transmis tel quel.
+      const payload = { ...f, properties: { ...f.properties } };
+      if (typeof payload.properties.photo === 'string' && payload.properties.photo.startsWith('data:')) {
+        payload.properties.photo = null;
+      }
+      const res = await fetch(RPC_ENREGISTRER_PARCELLE, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': 'Bearer ' + SUPABASE_ANON_KEY
+        },
+        body: JSON.stringify({ feature: payload })
+      });
+      if (res.ok) {
+        f.properties.synced = true;
+        ok++;
+      } else {
+        fail++;
+        const detail = await res.text().catch(() => '');
+        erreurs.push(`${f.properties.localite || f.properties.id} — HTTP ${res.status} ${detail}`.slice(0, 240));
+      }
+    } catch (err) {
+      fail++;
+      erreurs.push(`${f.properties.localite || f.properties.id} — ${err.message}`);
+    }
+  }
+  saveAll(list);
+  refreshList(); refreshSyncSummary();
+  statusEl.textContent = `Terminé : ${ok} synchronisée(s)${fail ? ', ' + fail + ' échec(s)' : ''}.`;
+  if (erreurs.length) {
+    statusEl.textContent += ' — ' + erreurs.join(' | ');
+    showToast('Échec de synchronisation — voir le détail sous le bouton.', true);
+  }
+});
+
+// ------------------------------------------------------------- Toasts -----
+let toastTimer = null;
+function showToast(msg, isError = false) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show' + (isError ? ' err' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+// ------------------------------------------------------------- Démarrage --
+resetForm();
+refreshMapLayer();
+refreshList();
+refreshSyncSummary();
+</script>
+</body></html>

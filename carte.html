@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Carte interactive — Région du Gbêkê</title>
+
+<script>
+  // Capture toute erreur (script/CSS non chargé, ou erreur JS) et l'affiche sur la page,
+  // même si l'erreur survient avant que le div #status n'existe encore dans le DOM.
+  window.__pendingErrors = [];
+  function __showError(msg) {
+    const el = document.getElementById('status');
+    if (el) {
+      el.textContent = msg;
+      el.className = 'error';
+      el.style.display = 'block';
+    } else {
+      window.__pendingErrors.push(msg);
+    }
+  }
+  window.addEventListener('error', function (e) {
+    let msg;
+    if (e.target && (e.target.src || e.target.href)) {
+      msg = 'Échec de chargement de : ' + (e.target.src || e.target.href);
+    } else {
+      msg = 'Erreur JavaScript : ' + e.message;
+    }
+    __showError(msg);
+  }, true);
+  document.addEventListener('DOMContentLoaded', function () {
+    if (window.__pendingErrors.length) {
+      __showError(window.__pendingErrors.join(' | '));
+    }
+  });
+</script>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+<style>
+  :root {
+    --ink: #1f2a24;
+    --paper: #f7f6f2;
+    --line: #d8d4c8;
+    --green-ok: #4a7c59;
+    --red-warn: #b5533c;
+    --accent: #2f5233;
+    --shadow-panel: 0 2px 6px rgba(0,0,0,0.12);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    font-family: "Segoe UI", -apple-system, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  header {
+    padding: 14px 20px;
+    background: var(--accent);
+    color: #fff;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header h1 {
+    font-size: 1.05rem;
+    margin: 0;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+  header .sub {
+    font-size: 0.8rem;
+    opacity: 0.85;
+  }
+  #map {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+  }
+  #status {
+    position: absolute;
+    z-index: 1000;
+    top: 70px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #fff;
+    border: 1px solid var(--line);
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    box-shadow: var(--shadow-panel);
+  }
+  #status.error { color: var(--red-warn); border-color: var(--red-warn); }
+  #status.ok { color: var(--green-ok); border-color: var(--green-ok); }
+  #legend {
+    position: absolute;
+    z-index: 1000;
+    bottom: 24px;
+    left: 12px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    font-size: 0.78rem;
+    box-shadow: var(--shadow-panel);
+    max-width: 260px;
+  }
+  #legend-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 10px;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    font: inherit;
+    font-weight: 700;
+    font-size: 0.78rem;
+    color: var(--accent);
+    cursor: pointer;
+    text-align: left;
+    border-radius: 6px 6px 0 0;
+  }
+  #legend-toggle:hover { background: #f0efe9; }
+  #legend-toggle .chevron { display: inline-flex; flex-shrink: 0; transition: transform 0.15s; }
+  #legend.collapsed #legend-toggle .chevron { transform: rotate(-90deg); }
+  #legend.collapsed #legend-toggle { border-radius: 6px; }
+  #legend-body {
+    padding: 0 12px 10px;
+    border-top: 1px solid var(--line);
+    max-height: 40vh;
+    overflow-y: auto;
+  }
+  #legend.collapsed #legend-body { display: none; }
+  #legend .row { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+  #legend .row:first-child { margin-top: 10px; }
+  #legend .swatch { width: 14px; height: 14px; border-radius: 3px; display: inline-block; flex-shrink: 0; }
+  .leaflet-popup-content { font-size: 0.85rem; }
+
+  #mode-selector {
+    position: absolute;
+    z-index: 1000;
+    top: 58px;
+    left: 12px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 4px;
+    display: flex;
+    gap: 4px;
+    box-shadow: var(--shadow-panel);
+  }
+  .mode-btn {
+    border: none;
+    background: transparent;
+    padding: 7px 12px;
+    font-size: 0.8rem;
+    font-family: inherit;
+    font-weight: 600;
+    color: var(--ink);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .mode-btn:hover { background: #f0efe9; }
+  .mode-btn.active { background: #1f2a24; color: #fff; }
+
+  #test-banner {
+    display: none;
+    position: absolute;
+    z-index: 999;
+    bottom: 24px;
+    right: 12px;
+    max-width: 300px;
+    background: #fff7e6;
+    border: 1px solid #d9a441;
+    color: #7a5210;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    box-shadow: var(--shadow-panel);
+  }
+
+  /* Sélecteur de culture façon "sélecteur de couche" ArcGIS : discret, en haut du panneau légende */
+  #culture-select-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 0 8px;
+    margin-bottom: 6px;
+    border-bottom: 1px solid var(--line);
+  }
+  #culture-select-row label {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+    opacity: 0.6;
+  }
+  #culture-select {
+    font: inherit;
+    font-size: 0.76rem;
+    font-weight: 600;
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 3px 6px;
+    cursor: pointer;
+  }
+  #culture-select:hover { border-color: var(--accent); }
+  #culture-select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  #dashboard {
+    position: absolute;
+    z-index: 1000;
+    top: 12px;
+    right: 12px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 16px;
+    min-width: 220px;
+    max-width: 280px;
+    box-shadow: var(--shadow-panel);
+    font-size: 0.82rem;
+  }
+  .dash-title {
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: var(--accent);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  #dash-content { color: var(--ink); line-height: 1.5; }
+  #dash-content .dash-row { display: flex; justify-content: space-between; gap: 12px; margin: 2px 0; }
+  #dash-content .dash-label { opacity: 0.7; }
+  #dash-content .dash-value { font-weight: 600; }
+  #dash-content .dash-note { margin-top: 6px; font-size: 0.75rem; opacity: 0.65; font-style: italic; }
+
+  /* Le bouton de zoom Leaflet (topleft) chevauchait le sélecteur de culture : on le repousse sous lui */
+  .leaflet-top.leaflet-left .leaflet-control-zoom {
+    margin-top: 104px;
+  }
+  .leaflet-control-home a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Cellules de la grille simulée (mode Parcelles) : fondu avec le fond de carte plutôt qu'un aplat opaque
+     (Leaflet nomme la pane "gridPane" -> classe générée "leaflet-grid-pane", suffixe "Pane" retiré) */
+  .leaflet-grid-pane {
+    mix-blend-mode: multiply;
+  }
+
+  /* Halo blanc autour des labels (routes/localités) pour rester lisibles sur fond coloré.
+     Ce sont des tuiles raster (<img>) : text-shadow ne s'applique pas à une image, on utilise
+     donc drop-shadow (qui agit sur le canal alpha du PNG transparent) pour le même effet.
+     Un seul drop-shadow flouté (au lieu de 4 empilés dans 4 directions) : mesuré en conditions
+     réelles, les 4 filtres chaînés faisaient chuter le framerate pendant l'animation de zoom
+     (~24 ms/frame en moyenne, pointes à 66 ms) ; un seul drop-shadow flouté donne un halo
+     equivalent pour un coût quasi nul (~16 ms/frame, identique à sans filtre du tout). */
+  .leaflet-labels-pane {
+    filter: drop-shadow(0 0 1.4px #fff);
+  }
+
+  #mobile-controls, #bottom-controls { display: contents; }
+
+  @media (max-width: 640px) {
+    /* Écran étroit : le zoom tactile (pincer) remplace les boutons +/- pour libérer la place */
+    .leaflet-control-zoom { display: none; }
+    .leaflet-control-home { display: none; }
+
+    #mobile-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: absolute;
+      z-index: 1000;
+      top: 8px;
+      left: 8px;
+      right: 8px;
+    }
+    #mobile-controls #mode-selector,
+    #mobile-controls #dashboard {
+      position: static;
+      width: auto;
+      min-width: 0;
+      max-width: none;
+    }
+    #mobile-controls #mode-selector {
+      flex-wrap: wrap;
+    }
+    #mobile-controls #dashboard {
+      max-height: 38vh;
+      overflow-y: auto;
+    }
+
+    #bottom-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: absolute;
+      z-index: 999;
+      bottom: 12px;
+      left: 12px;
+      right: 12px;
+    }
+    #bottom-controls #test-banner,
+    #bottom-controls #legend {
+      position: static;
+      width: auto;
+      max-width: none;
+    }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Système d'Information des Cultures Vivrières — Prototype</h1>
+    <div class="sub">Riz, Manioc, Igname · Région du Gbêkê · Données OpenStreetMap / Annuaires agricoles</div>
+  </header>
+  <div style="position: relative; flex: 1; min-height: 0;">
+    <div id="map"></div>
+    <div id="status" style="display: none;"></div>
+    <div id="mobile-controls">
+      <div id="mode-selector">
+        <button class="mode-btn" data-mode="parcelles">Parcelles</button>
+        <button class="mode-btn active" data-mode="performance">Performance (département)</button>
+      </div>
+      <div id="dashboard">
+        <div class="dash-title">Zone sélectionnée</div>
+        <div id="dash-content">
+          <div style="font-weight:700; margin-bottom:4px;">Total Gbêkê</div>
+          <div class="dash-row"><span class="dash-label">Superficie</span><span class="dash-value">12 020 ha</span></div>
+          <div class="dash-row"><span class="dash-label">Production</span><span class="dash-value">38 743 t</span></div>
+          <div class="dash-note">Cliquez sur un département pour le détail — Source : Annuaire des cultures vivrières 2022-2023 (2023)</div>
+        </div>
+      </div>
+    </div>
+    <div id="bottom-controls">
+      <div id="test-banner" style="display: none;">
+        <strong>Aucune parcelle collectée</strong> — la base Supabase ne contient encore aucune parcelle terrain. Les polygones apparaîtront ici au fur et à mesure des synchronisations depuis le formulaire de saisie.
+      </div>
+      <div id="legend">
+        <button id="legend-toggle" type="button" aria-expanded="true" aria-controls="legend-body">
+          <span>Légende</span>
+          <span class="chevron" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="4 6 8 10 12 6"></polyline>
+            </svg>
+          </span>
+        </button>
+        <div id="legend-body">
+          <div id="culture-select-row">
+            <label for="culture-select">Culture</label>
+            <select id="culture-select">
+              <option value="riz" selected>Riz</option>
+              <option value="manioc">Manioc</option>
+              <option value="igname">Igname</option>
+              <option value="toutes">Toutes</option>
+            </select>
+          </div>
+          <div id="legend-performance" style="display: block;">
+            <div class="row"><span class="swatch" style="background:#4a7c59;"></span> Rendement ≥ moyenne du Gbêkê</div>
+            <div class="row"><span class="swatch" style="background:#b5533c;"></span> Rendement &lt; moyenne du Gbêkê</div>
+            <div class="row"><span class="swatch" style="background:#8a8f86;"></span> Aucune parcelle collectée</div>
+          </div>
+          <div id="legend-parcelles" style="display: none;">
+            <div class="row"><span class="swatch" style="background:#2f9e44;"></span> Parcelle de riz</div>
+            <div class="row"><span class="swatch" style="background:#e8590c;"></span> Parcelle de manioc</div>
+            <div class="row"><span class="swatch" style="background:#9c36b5;"></span> Parcelle d'igname</div>
+            <div class="row" style="opacity:0.7;">Contour réel collecté sur le terrain</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Carte centrée approximativement sur Bouaké (chef-lieu du Gbêkê)
+  // preferCanvas : les contours (région + départements) et les polygones de performance sont rendus
+  // en Canvas plutôt qu'en SVG par défaut, plus fluide pendant le zoom avec des géométries détaillées.
+  const map = L.map('map', { zoomControl: true, preferCanvas: true }).setView([7.69, -5.03], 9);
+
+  // Marge réutilisée par tous les fitBounds() de la carte, pour que les contours ne touchent
+  // jamais le bord de la fenêtre.
+  const FIT_PADDING = { padding: [20, 20] };
+
+  // Fond de carte sans les labels (routes/localités) : les labels sont ajoutés séparément plus bas,
+  // dans leur propre pane, pour rester lisibles au-dessus des polygones colorés (voir gridPane/labelsPane).
+  // Fond gris clair sans labels — Esri "World Light Gray Base". Ne nécessite aucune clé API
+  // (l'ancien fond CARTO light_nolabels renvoie désormais des tuiles filigranées « API KEY REQUIRED »).
+  // Esri : ordre {z}/{y}/{x}, pas de sous-domaines {s}. Tuiles natives jusqu'au zoom 16 ;
+  // au-delà, Leaflet ré-échantillonne la tuile z16 (maxNativeZoom) au lieu d'afficher du gris.
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxNativeZoom: 16,
+    maxZoom: 19
+  }).addTo(map);
+
+  // Pane dédié aux cellules de la grille simulée : permet un fondu (mix-blend-mode) avec le fond de carte
+  // au lieu d'un aplat opaque façon "carrés collés" (cf. #gridPane dans <style>).
+  map.createPane('gridPane');
+  map.getPane('gridPane').style.zIndex = 450;
+
+  // Pane dédié aux labels (routes/localités), au-dessus de gridPane ET des polygones de département
+  // (overlayPane, z-index 400), pour qu'ils restent lisibles quelle que soit la couleur de la zone en dessous.
+  map.createPane('labelsPane');
+  map.getPane('labelsPane').style.zIndex = 650;
+  map.getPane('labelsPane').style.pointerEvents = 'none'; // laisse les clics passer vers les polygones
+
+  // Labels seuls (routes/localités) — Esri "World Light Gray Reference", même source que le fond ci-dessus.
+  // Couche transparente, placée dans labelsPane pour rester au-dessus des polygones de département.
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+    pane: 'labelsPane',
+    maxNativeZoom: 16,
+    maxZoom: 19
+  }).addTo(map);
+
+  // Bouton "retour à la vue initiale" (maison), sous les boutons +/- de zoom (empilement automatique
+  // Leaflet dans le coin topleft). Recentre sur l'ensemble de la région du Gbêkê, quel que soit le
+  // mode/la culture affichés au moment du clic.
+  const HomeControl = L.Control.extend({
+    options: { position: 'topleft' },
+    onAdd: function () {
+      const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control leaflet-control-home');
+      const link = L.DomUtil.create('a', '', container);
+      link.href = '#';
+      link.title = 'Revenir à la vue initiale (Gbêkê)';
+      link.setAttribute('role', 'button');
+      link.setAttribute('aria-label', 'Revenir à la vue initiale (Gbêkê)');
+      link.innerHTML =
+        '<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M2 7.5 L8 2 L14 7.5"/><path d="M3.5 6.5 V14 H12.5 V6.5"/><path d="M6.5 14 V10 H9.5 V14"/>' +
+        '</svg>';
+      L.DomEvent.disableClickPropagation(container);
+      L.DomEvent.on(link, 'click', (e) => {
+        L.DomEvent.preventDefault(e);
+        map.fitBounds(L.geoJSON(gbekeGeoJSON).getBounds(), FIT_PADDING);
+      });
+      return container;
+    }
+  });
+  map.addControl(new HomeControl());
+
+  const statusEl = document.getElementById('status');
+
+  // Limites du Gbêkê chargées directement depuis un fichier GeoJSON local (export Overpass Turbo)
+  const gbekeGeoJSON = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-5.646769, 7.25003], [-5.6349158, 7.2686391], [-5.4942141, 7.302618], [-5.4384508, 7.3079481], [-5.4335418, 7.2845759], [-5.4093552, 7.28514], [-5.3905129, 7.2438812], [-5.3405981, 7.2475691], [-5.2960458, 7.2334208], [-5.273344, 7.271421], [-5.247241, 7.295516], [-5.207725, 7.294939], [-5.1936541, 7.3274908], [-5.167244, 7.3492012], [-5.105226, 7.357347], [-5.0626092, 7.3790641], [-5.0568762, 7.413703], [-5.0436368, 7.4360042], [-5.001266, 7.4785991], [-4.9732938, 7.4910569], [-4.9296079, 7.4869871], [-4.9294319, 7.5163431], [-4.9006462, 7.5470729], [-4.8858042, 7.572813], [-4.8659372, 7.5601888], [-4.831459, 7.5602012], [-4.8165069, 7.5744939], [-4.7892079, 7.566062], [-4.7750592, 7.583375], [-4.7241902, 7.5313158], [-4.6873779, 7.5187292], [-4.6592822, 7.5398598], [-4.6509838, 7.5653992], [-4.6105499, 7.5755162], [-4.5971222, 7.6044879], [-4.575809, 7.6219292], [-4.5439248, 7.6184821], [-4.5312839, 7.6049638], [-4.5051389, 7.6152058], [-4.4972301, 7.6440811], [-4.5103679, 7.6783762], [-4.5252018, 7.7554288], [-4.5494862, 7.8028798], [-4.5338678, 7.830719], [-4.5574212, 7.834271], [-4.6097188, 7.8747282], [-4.611567, 7.884789], [-4.5928388, 7.9476738], [-4.6214142, 7.9703612], [-4.6363502, 7.998991], [-4.6575208, 8.0121222], [-4.7372359, 8.0308731], [-4.7669582, 8.0168333], [-4.8122559, 8.0058346], [-4.9293761, 7.970819], [-4.952817, 7.9891448], [-4.981678, 7.99788], [-5.0249939, 7.9873252], [-5.0656929, 7.9650989], [-5.1003571, 7.969728], [-5.1490989, 7.955111], [-5.2064438, 8.0132551], [-5.239285, 8.0195723], [-5.2369871, 8.0388126], [-5.2542958, 8.0562277], [-5.2755761, 8.059432], [-5.3037639, 8.0896158], [-5.3481131, 8.1534185], [-5.3739318, 8.1649477], [-5.3960738, 8.144834], [-5.3958344, 8.1096978], [-5.44869, 8.1124436], [-5.4650047, 8.1024497], [-5.5109582, 8.108262], [-5.5221973, 8.0762086], [-5.5444127, 8.0563124], [-5.549656, 8.0363065], [-5.5714983, 8.0218164], [-5.5697727, 8.000796], [-5.5946264, 7.9629047], [-5.603609, 7.9163572], [-5.6278342, 7.883498], [-5.6154902, 7.842505], [-5.6511848, 7.8397836], [-5.6670903, 7.7821828], [-5.6609695, 7.7481129], [-5.6793373, 7.7174948], [-5.6789663, 7.6881583], [-5.6903236, 7.6649287], [-5.6885576, 7.6365411], [-5.6374026, 7.6181445], [-5.6948662, 7.5845818], [-5.6684733, 7.5569087], [-5.6700397, 7.5456135], [-5.7347882, 7.4934731], [-5.7364941, 7.4776021], [-5.7156801, 7.4562412], [-5.7301856, 7.4099205], [-5.7250788, 7.3817044], [-5.6904459, 7.3585512], [-5.7093287, 7.3246281], [-5.669632, 7.2826995], [-5.646769, 7.25003]]]}, "properties": {"@id": "relation/3603161", "admin_level": "5", "boundary": "administrative", "comment": "following official decrets, the correct spelling is Gb\u00eak\u00ea with two ^", "name": "Gb\u00eak\u00ea", "note": "une r\u00e9gion en C\u00f4te d\u2019Ivoire", "official_name": "R\u00e9gion de Gb\u00eak\u00ea", "type": "boundary", "wikidata": "Q22080826"}, "id": "relation/3603161"}]};
+
+  // Contours des 4 départements du Gbêkê (reconstitués depuis un export Overpass Turbo)
+  const deptGeoJSON = {"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-5.206420656999967, 7.6481117890000405], [-5.233655794999947, 7.607982334000042], [-5.316090949999932, 7.621109262000061], [-5.328734765999968, 7.647388507000073], [-5.374745434999966, 7.645858734000058], [-5.380915062999975, 7.61900803900005], [-5.38604776699998, 7.616066685000021], [-5.390423923999947, 7.6156635160000405], [-5.395792751999977, 7.614026771000056], [-5.38894789099993, 7.584582337000029], [-5.426539339999977, 7.551064019000023], [-5.444109785999956, 7.4755815100000405], [-5.522747931999959, 7.465066623000041], [-5.5711678589999565, 7.447154595000029], [-5.659136012999966, 7.4327973870000505], [-5.667742760999943, 7.422134863000053], [-5.668161866999981, 7.413991808000048], [-5.67479226699993, 7.405871326000067], [-5.679566122999972, 7.402326966000032], [-5.68662672499994, 7.4004291810000495], [-5.689325851999968, 7.3928287660000365], [-5.699620969999955, 7.36479489900006], [-5.705027942999948, 7.304148075000057], [-5.656068927999968, 7.271425761000046], [-5.583486016999927, 7.271117476000029], [-5.484392327999956, 7.309545903000071], [-5.436291559999972, 7.307216281000024], [-5.396914227999957, 7.244661933000032], [-5.327548803999946, 7.244542679000062], [-5.298569341999951, 7.230490168000074], [-5.249881939999966, 7.293130438000048], [-5.205389061999938, 7.319419212000071], [-5.2066751109999245, 7.383219028000042], [-5.153332234999937, 7.451445329000023], [-5.149011454999936, 7.507781832000035], [-5.112601913999981, 7.545640232000039], [-5.100869024999952, 7.58160299900004], [-5.174723363999931, 7.619345625000051], [-5.197159283999952, 7.650550514000031], [-5.206420656999967, 7.6481117890000405]]]}, "properties": {"name": "Sakassou", "admin_level": "6", "boundary": "administrative", "source": "shapefile officiel CIGN (Dr KOUAM\u00c9 Gui-Baubin)"}}, {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-5.315657595999937, 8.112483155000064], [-5.35673757099994, 8.162000517000024], [-5.405774810999958, 8.158237022000037], [-5.396245482999973, 8.109466531000066], [-5.430162303999964, 8.101082574000031], [-5.488334108999936, 8.117044538000073], [-5.510672614999976, 8.107769683000072], [-5.57004634599997, 7.998875660000067], [-5.679977837999957, 8.001443079000069], [-5.696534221999968, 8.037842890000036], [-5.7463187679999805, 8.053778653000052], [-5.7483096429999705, 8.026294653000036], [-5.720293952999953, 7.941024653000056], [-5.764822060999961, 7.878191250000043], [-5.772356053999943, 7.8244991000000255], [-5.760573713999975, 7.7973531260000755], [-5.694431355999939, 7.751932765000049], [-5.6771836639999265, 7.693876290000048], [-5.696625327999925, 7.66705315400003], [-5.658018426999945, 7.608883647000027], [-5.695731124999952, 7.589973289000056], [-5.6750425039999755, 7.558893682000075], [-5.714591522999967, 7.527802526000073], [-5.71456643099998, 7.455258540000045], [-5.726197653999975, 7.394835499000067], [-5.699620969999955, 7.36479489900006], [-5.689325851999968, 7.3928287660000365], [-5.68662672499994, 7.4004291810000495], [-5.679566122999972, 7.402326966000032], [-5.67479226699993, 7.405871326000067], [-5.668161866999981, 7.413991808000048], [-5.667742760999943, 7.422134863000053], [-5.659136012999966, 7.4327973870000505], [-5.5711678589999565, 7.447154595000029], [-5.522747931999959, 7.465066623000041], [-5.444109785999956, 7.4755815100000405], [-5.426539339999977, 7.551064019000023], [-5.38894789099993, 7.584582337000029], [-5.395792751999977, 7.614026771000056], [-5.390423923999947, 7.6156635160000405], [-5.38604776699998, 7.616066685000021], [-5.380915062999975, 7.61900803900005], [-5.374745434999966, 7.645858734000058], [-5.392606152999974, 7.688151277000031], [-5.334081165999976, 7.752374504000045], [-5.344455122999932, 7.803696304000027], [-5.374469602999966, 7.8057985340000755], [-5.417773324999928, 7.876432753000074], [-5.375287958999934, 7.9263760580000735], [-5.367569149999952, 7.944443118000038], [-5.379249812999944, 7.979907695000065], [-5.3650298209999505, 8.055432426000039], [-5.315657595999937, 8.112483155000064]]]}, "properties": {"name": "B\u00e9oumi", "admin_level": "6", "boundary": "administrative", "source": "shapefile officiel CIGN (Dr KOUAM\u00c9 Gui-Baubin)"}}, {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-5.205389061999938, 7.319419212000071], [-5.179733012999975, 7.338897644000042], [-5.144645883999942, 7.326222360000031], [-5.115936433999934, 7.347069132000058], [-5.077663790999964, 7.342508794000025], [-5.068093530999931, 7.409980689000065], [-5.021142514999951, 7.476106586000071], [-4.928825191999977, 7.516364433000035], [-4.882455942999968, 7.573302085000023], [-4.861544154999933, 7.559918474000028], [-4.7754017619999445, 7.583502366000062], [-4.73810545799995, 7.533178293000049], [-4.688200150999933, 7.5219264830000725], [-4.660529781999969, 7.55417723100004], [-4.601791133999939, 7.58379375800007], [-4.575326269999948, 7.624781846000076], [-4.522894828999938, 7.6061179690000245], [-4.50183710999994, 7.61872231600006], [-4.518599646999974, 7.73597417600007], [-4.5386109779999515, 7.8076619750000305], [-4.56513519899994, 7.849642663000054], [-4.609939869999948, 7.885278775000074], [-4.5925378129999785, 7.9466475240000705], [-4.638792590999969, 8.000018857000043], [-4.715268125999955, 8.02575207700005], [-4.789243086999932, 8.01603308600005], [-4.928498417999947, 7.97032338300005], [-4.959837981999954, 7.991647944000022], [-5.02812176599997, 7.989597472000071], [-5.068916143999957, 7.962090413000055], [-5.09082209099995, 7.950685962000023], [-5.121614724999972, 7.85482088200007], [-5.11992786199994, 7.789803952000057], [-5.14933255699998, 7.7336398100000565], [-5.192029934999937, 7.699481883000033], [-5.196473290999961, 7.657334576000039], [-5.195901558999935, 7.651846710000029], [-5.197159283999952, 7.650550514000031], [-5.174723363999931, 7.619345625000051], [-5.100869024999952, 7.58160299900004], [-5.112601913999981, 7.545640232000039], [-5.149011454999936, 7.507781832000035], [-5.153332234999937, 7.451445329000023], [-5.2066751109999245, 7.383219028000042], [-5.205389061999938, 7.319419212000071]]]}, "properties": {"name": "Bouak\u00e9", "admin_level": "6", "boundary": "administrative", "source": "shapefile officiel CIGN (Dr KOUAM\u00c9 Gui-Baubin)"}}, {"type": "Feature", "geometry": {"type": "Polygon", "coordinates": [[[-5.068916143999957, 7.962090413000055], [-5.088483058999941, 7.971234922000065], [-5.1492553539999335, 7.9545429840000565], [-5.202789292999967, 8.013306830000033], [-5.279987802999926, 8.067484704000037], [-5.315657595999937, 8.112483155000064], [-5.3650298209999505, 8.055432426000039], [-5.379249812999944, 7.979907695000065], [-5.367569149999952, 7.944443118000038], [-5.375287958999934, 7.9263760580000735], [-5.417773324999928, 7.876432753000074], [-5.374469602999966, 7.8057985340000755], [-5.344455122999932, 7.803696304000027], [-5.334081165999976, 7.752374504000045], [-5.392606152999974, 7.688151277000031], [-5.374745434999966, 7.645858734000058], [-5.328734765999968, 7.647388507000073], [-5.316090949999932, 7.621109262000061], [-5.233655794999947, 7.607982334000042], [-5.206420656999967, 7.6481117890000405], [-5.195901558999935, 7.651846710000029], [-5.196473290999961, 7.657334576000039], [-5.192029934999937, 7.699481883000033], [-5.14933255699998, 7.7336398100000565], [-5.11992786199994, 7.789803952000057], [-5.121614724999972, 7.85482088200007], [-5.09082209099995, 7.950685962000023], [-5.068916143999957, 7.962090413000055]]]}, "properties": {"name": "Botro", "admin_level": "6", "boundary": "administrative", "source": "shapefile officiel CIGN (Dr KOUAM\u00c9 Gui-Baubin)"}}]};
+
+
+  // ======================================================================
+  //  Données : API REST Supabase (remplace les données simulées d'origine —
+  //  DATA.*.parDepartement et la grille grilleGeoJSON).
+  //   - vue "parcelles_publique"            -> parcelles réelles (mode Parcelles)
+  //   - vue "parcelles_totaux_departement"  -> agrégats surface / production /
+  //     rendement par département et par culture (mode Performance)
+  //  La clé publique "anon" ci-dessous n'autorise QUE la lecture de ces deux
+  //  vues (aucun accès à la table "parcelles", donc ni producteur ni
+  //  téléphone) — cf. supabase_rls_policies.sql.
+  // ======================================================================
+  const SUPABASE_URL = 'https://lbvuzomkpiveefnbuwlp.supabase.co';
+  const SUPABASE_ANON_KEY = 'sb_publishable_WCNcNcvxjLSbPO2VQUudDw_Kd5H1N0b';
+  const REST = SUPABASE_URL + '/rest/v1/';
+  const SB_HEADERS = { apikey: SUPABASE_ANON_KEY, Authorization: 'Bearer ' + SUPABASE_ANON_KEY };
+
+  const CULTURE_COLORS = { riz: '#2f9e44', manioc: '#e8590c', igname: '#9c36b5' };
+  const SOURCE_LABEL = 'Données terrain — base Supabase du projet';
+
+  // Remplies par chargerDonnees() au démarrage
+  let parcellesGeoJSON = { type: 'FeatureCollection', features: [] };
+  let totauxDepartement = [];   // lignes brutes de la vue parcelles_totaux_departement
+
+  let currentCulture = 'riz';
+  let currentMode = 'performance'; // 'performance' | 'parcelles'
+  let deptLayerGroup = null;
+  let regionLayerGroup = null;
+  let gridLayerGroup = null;
+
+  function fmt(n) {
+    return Number(n || 0).toLocaleString('fr-FR', { maximumFractionDigits: 1 });
+  }
+
+  // --- Agrégats département x culture ----------------------------------
+  // -> { 'Béoumi': {surface, production, rendement, nb}, ... } pour une culture
+  function totauxParDepartement(culture) {
+    const out = {};
+    totauxDepartement
+      .filter(r => r.culture === culture)
+      .forEach(r => {
+        out[r.departement] = {
+          surface: Number(r.surface_totale_ha) || 0,
+          production: Number(r.production_totale_t) || 0,
+          rendement: r.rendement_moyen_t_ha == null ? null : Number(r.rendement_moyen_t_ha),
+          nb: Number(r.nb_parcelles) || 0
+        };
+      });
+    return out;
+  }
+
+  // Rendement moyen du Gbêkê pour une culture (moyenne des départements renseignés)
+  function rendementMoyenGbeke(culture) {
+    const vals = Object.values(totauxParDepartement(culture))
+      .map(d => d.rendement)
+      .filter(v => v != null && !isNaN(v));
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }
+
+  function totauxRegion(culture) {
+    return Object.values(totauxParDepartement(culture)).reduce((acc, d) => {
+      acc.surface += d.surface; acc.production += d.production; acc.nb += d.nb;
+      return acc;
+    }, { surface: 0, production: 0, nb: 0 });
+  }
+
+  // --- Tableau de bord ------------------------------------------------
+  function updateDashboard(zoneName, info) {
+    document.getElementById('dash-content').innerHTML = `
+      <div style="font-weight:700; margin-bottom:4px;">${zoneName}</div>
+      <div class="dash-row"><span class="dash-label">Parcelles</span><span class="dash-value">${fmt(info.nb)}</span></div>
+      <div class="dash-row"><span class="dash-label">Superficie</span><span class="dash-value">${fmt(info.surface)} ha</span></div>
+      <div class="dash-row"><span class="dash-label">Production</span><span class="dash-value">${fmt(info.production)} t</span></div>
+      <div class="dash-row"><span class="dash-label">Rendement moy.</span><span class="dash-value">${info.rendement == null ? '—' : fmt(info.rendement) + ' t/ha'}</span></div>
+      <div class="dash-note">Source : ${SOURCE_LABEL}</div>
+    `;
+  }
+
+  function showRegionTotals() {
+    const dashEl = document.getElementById('dash-content');
+    if (currentCulture === 'toutes') {
+      dashEl.innerHTML = `
+        <div style="font-weight:700; margin-bottom:4px;">Total Gbêkê — toutes cultures</div>
+        <div class="dash-row"><span class="dash-label">Riz</span><span class="dash-value">${fmt(totauxRegion('riz').production)} t</span></div>
+        <div class="dash-row"><span class="dash-label">Manioc</span><span class="dash-value">${fmt(totauxRegion('manioc').production)} t</span></div>
+        <div class="dash-row"><span class="dash-label">Igname</span><span class="dash-value">${fmt(totauxRegion('igname').production)} t</span></div>
+        <div class="dash-note">Source : ${SOURCE_LABEL}</div>
+      `;
+      return;
+    }
+    const t = totauxRegion(currentCulture);
+    dashEl.innerHTML = `
+      <div style="font-weight:700; margin-bottom:4px;">Total Gbêkê — ${currentCulture}</div>
+      <div class="dash-row"><span class="dash-label">Parcelles</span><span class="dash-value">${fmt(t.nb)}</span></div>
+      <div class="dash-row"><span class="dash-label">Superficie</span><span class="dash-value">${fmt(t.surface)} ha</span></div>
+      <div class="dash-row"><span class="dash-label">Production</span><span class="dash-value">${fmt(t.production)} t</span></div>
+      <div class="dash-note">${currentMode === 'performance' ? 'Cliquez sur un département pour le détail' : 'Cliquez sur une parcelle pour le détail'} — Source : ${SOURCE_LABEL}</div>
+    `;
+  }
+
+  function clearAllLayers() {
+    [deptLayerGroup, regionLayerGroup, gridLayerGroup].forEach(l => { if (l && map.hasLayer(l)) map.removeLayer(l); });
+  }
+
+  // --- Mode Performance : choroplèthe rendement par département (EF6) ---
+  function renderPerformance(culture) {
+    clearAllLayers();
+    const parDept = totauxParDepartement(culture);
+    const moyenne = rendementMoyenGbeke(culture);
+
+    deptLayerGroup = L.geoJSON(deptGeoJSON, {
+      style: feature => {
+        const d = parDept[feature.properties.name];
+        let color = '#8a8f86'; // gris : aucune parcelle collectée dans ce département
+        if (d && d.rendement != null && moyenne != null) {
+          color = d.rendement >= moyenne ? '#4a7c59' : '#b5533c';
+        } else if (d && d.nb > 0) {
+          color = '#4a7c59';
+        }
+        return { color: '#2f5233', weight: 2, fillColor: color, fillOpacity: 0.6 };
+      },
+      onEachFeature: (feature, layer) => {
+        const name = feature.properties.name;
+        const d = parDept[name];
+        layer.bindPopup(
+          '<strong>' + name + '</strong><br>' +
+          (d
+            ? ('Parcelles : ' + fmt(d.nb) + '<br>Production : ' + fmt(d.production) + ' t<br>Superficie : ' + fmt(d.surface) + ' ha<br>Rendement moyen : ' + (d.rendement == null ? '—' : fmt(d.rendement) + ' t/ha'))
+            : 'Aucune parcelle collectée')
+        );
+        layer.on('click', () => {
+          updateDashboard(name, d || { nb: 0, surface: 0, production: 0, rendement: null });
+        });
+      }
+    }).addTo(map);
+    map.fitBounds(deptLayerGroup.getBounds(), FIT_PADDING);
+  }
+
+  // --- Mode Parcelles : polygones réels collectés sur le terrain -------
+  function renderParcelles(culture) {
+    clearAllLayers();
+
+    // Fond léger : contours + wash gris clair sur les 4 départements (contexte visuel)
+    deptLayerGroup = L.geoJSON(deptGeoJSON, {
+      style: { color: '#5b6660', weight: 1.5, fillColor: '#c9c4b4', fillOpacity: 0.12 }
+    }).addTo(map);
+
+    const cultures = culture === 'toutes' ? ['riz', 'manioc', 'igname'] : [culture];
+    const features = parcellesGeoJSON.features.filter(f => cultures.includes(f.properties.culture));
+
+    gridLayerGroup = L.geoJSON({ type: 'FeatureCollection', features }, {
+      pane: 'gridPane',
+      renderer: L.canvas({ padding: 0.5, pane: 'gridPane' }),
+      style: feature => ({
+        color: '#2f5233', weight: 1,
+        fillColor: CULTURE_COLORS[feature.properties.culture] || '#666',
+        fillOpacity: 0.6
+      }),
+      onEachFeature: (feature, layer) => {
+        const p = feature.properties;
+        const html = '<strong>' + (p.culture ? p.culture[0].toUpperCase() + p.culture.slice(1) : 'Parcelle') + '</strong> ' +
+          '<span style="opacity:0.7;">(' + (p.departement || '') + ')</span><br>' +
+          'Localité : ' + (p.localite || '—') + '<br>' +
+          'Superficie : ' + fmt(p.surface_ha) + ' ha<br>' +
+          (p.production_estimee_t != null ? 'Production estimée : ' + fmt(p.production_estimee_t) + ' t<br>' : '') +
+          (p.rendement_estime_t_ha != null ? 'Rendement estimé : ' + fmt(p.rendement_estime_t_ha) + ' t/ha<br>' : '') +
+          '<em style="opacity:0.7;">Agent : ' + (p.agent_enqueteur || '—') + ' · ' + (p.date_collecte || '') + '</em>';
+        layer.bindPopup(html);
+      }
+    }).addTo(map);
+
+    const b = gridLayerGroup.getBounds();
+    map.fitBounds(b && b.isValid() ? b : deptLayerGroup.getBounds(), FIT_PADDING);
+  }
+
+  function render() {
+    if (currentMode === 'performance') {
+      renderPerformance(currentCulture === 'toutes' ? 'riz' : currentCulture);
+    } else {
+      renderParcelles(currentCulture);
+    }
+    showRegionTotals();
+
+    const aucuneParcelle = parcellesGeoJSON.features.length === 0;
+    document.getElementById('test-banner').style.display = (currentMode === 'parcelles' && aucuneParcelle) ? 'block' : 'none';
+    document.getElementById('legend-performance').style.display = currentMode === 'performance' ? 'block' : 'none';
+    document.getElementById('legend-parcelles').style.display = currentMode === 'parcelles' ? 'block' : 'none';
+  }
+
+  // Sélecteur de culture (EF1) — menu déroulant façon "sélecteur de couche", en haut du panneau légende
+  document.getElementById('culture-select').addEventListener('change', (e) => {
+    currentCulture = e.target.value;
+    // "Toutes" n'a de sens qu'en vue Parcelles ; en Performance on retombe sur Riz
+    if (currentCulture === 'toutes' && currentMode === 'performance') {
+      document.querySelector('.mode-btn[data-mode="parcelles"]').click();
+      return;
+    }
+    render();
+  });
+
+  // Sélecteur de mode (Performance département / Parcelles)
+  document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentMode = btn.dataset.mode;
+      render();
+    });
+  });
+
+  // Légende rétractable/dépliable
+  const legendEl = document.getElementById('legend');
+  const legendToggle = document.getElementById('legend-toggle');
+  legendToggle.addEventListener('click', () => {
+    const collapsed = legendEl.classList.toggle('collapsed');
+    legendToggle.setAttribute('aria-expanded', String(!collapsed));
+  });
+
+  // --- Chargement des données depuis Supabase, puis premier rendu ------
+  async function chargerDonnees() {
+    const [rParc, rTot] = await Promise.all([
+      fetch(REST + 'parcelles_publique?select=id,geometry,properties', { headers: SB_HEADERS }),
+      fetch(REST + 'parcelles_totaux_departement?select=*', { headers: SB_HEADERS })
+    ]);
+    if (!rParc.ok) throw new Error('parcelles_publique : HTTP ' + rParc.status + ' ' + (await rParc.text().catch(() => '')));
+    if (!rTot.ok)  throw new Error('parcelles_totaux_departement : HTTP ' + rTot.status + ' ' + (await rTot.text().catch(() => '')));
+
+    const rows = await rParc.json();
+    parcellesGeoJSON = {
+      type: 'FeatureCollection',
+      features: rows.map(row => ({
+        type: 'Feature',
+        geometry: typeof row.geometry === 'string' ? JSON.parse(row.geometry) : row.geometry,
+        properties: row.properties || {}
+      }))
+    };
+    totauxDepartement = await rTot.json();
+  }
+
+  (async () => {
+    statusEl.style.display = 'block';
+    statusEl.className = '';
+    statusEl.textContent = 'Chargement des données depuis Supabase…';
+    try {
+      await chargerDonnees();
+      render();
+      const n = parcellesGeoJSON.features.length;
+      statusEl.textContent = n
+        ? `Données du Gbêkê chargées — ${n} parcelle(s).`
+        : "Connecté à Supabase — aucune parcelle collectée pour l'instant.";
+      statusEl.className = 'ok';
+      setTimeout(() => { statusEl.style.display = 'none'; }, 3000);
+    } catch (err) {
+      try { render(); } catch (e) { /* rendu minimal impossible : on garde le message d'erreur */ }
+      statusEl.textContent = 'Impossible de charger les données Supabase : ' + err.message;
+      statusEl.className = 'error';
+      statusEl.style.display = 'block';
+      console.error(err);
+    }
+  })();
+</script>
+
+
+</body></html>
