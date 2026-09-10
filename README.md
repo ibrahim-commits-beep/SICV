@@ -3,7 +3,7 @@
 Prototype web du **Système d'Information des Cultures Vivrières** (BNETD, Phase 1) pour
 la région du Gbêkê : riz, manioc, igname.
 
-**Site en ligne :** https://GITHUB_USERNAME.github.io/sicv-gbeke/
+**Site en ligne :** https://ibrahim-commits-beep.github.io/sicv-gbeke/
 
 | Page | Rôle |
 |---|---|
