@@ -347,7 +347,7 @@
 <div id="app">
   <header>
     <h1>Système d'Information des Cultures Vivrières — Prototype</h1>
-    <div class="sub">Riz, Manioc, Igname · Région du Gbêkê · Données OpenStreetMap / Annuaires agricoles</div>
+    <div class="sub">Riz, Manioc, Igname · Région du Gbêkê · Données OpenStreetMap / Annuaires agricoles · <a href="index.html" style="color:#fff; font-weight:700; text-decoration:underline; margin-left:6px;">Accueil</a> <a href="formulaire.html" style="color:#fff; font-weight:700; text-decoration:underline; margin-left:6px;">Saisie terrain →</a></div>
   </header>
   <div style="position: relative; flex: 1; min-height: 0;">
     <div id="map"></div>
@@ -443,11 +443,24 @@
 
   // Labels seuls (routes/localités) — Esri "World Light Gray Reference", même source que le fond ci-dessus.
   // Couche transparente, placée dans labelsPane pour rester au-dessus des polygones de département.
-  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
+  const basemapLabels = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {
     pane: 'labelsPane',
     maxNativeZoom: 16,
     maxZoom: 19
-  }).addTo(map);
+  });
+
+  // Les noms des 4 départements sont dessinés par l'app (addDeptLabels, plus bas). Aux zooms
+  // éloignés, les libellés du fond de carte répéteraient ces mêmes noms (« Bouake » à côté de
+  // « Bouaké »…) : on ne les affiche donc qu'à partir d'un zoom où ils apportent autre chose
+  // (villes, routes, villages).
+  const BASEMAP_LABELS_MIN_ZOOM = 11;
+  function syncBasemapLabels() {
+    const show = map.getZoom() >= BASEMAP_LABELS_MIN_ZOOM;
+    if (show && !map.hasLayer(basemapLabels)) basemapLabels.addTo(map);
+    else if (!show && map.hasLayer(basemapLabels)) map.removeLayer(basemapLabels);
+  }
+  map.on('zoomend', syncBasemapLabels);
+  syncBasemapLabels();
 
   // Bouton "retour à la vue initiale" (maison), sous les boutons +/- de zoom (empilement automatique
   // Leaflet dans le coin topleft). Recentre sur l'ensemble de la région du Gbêkê, quel que soit le
@@ -643,6 +656,7 @@ function getMergedCulture(culture) {
   // Remplies par chargerDonnees(), en arrière-plan, après le premier rendu
   let parcellesGeoJSON = { type: 'FeatureCollection', features: [] };
   let totauxDepartement = [];   // lignes brutes de la vue parcelles_totaux_departement
+  let terrainStatus = 'pending'; // 'pending' | 'ok' | 'error' — état du chargement Supabase
 
   // -> { 'Béoumi': {surface, production, rendement, nb}, ... } pour une culture (données réelles uniquement)
   function totauxParDepartement(culture) {
@@ -670,11 +684,27 @@ function getMergedCulture(culture) {
   // Bloc complémentaire « données terrain réelles », ajouté sous les chiffres de référence
   // quand au moins une parcelle a été synchronisée depuis le formulaire — jamais affiché
   // à la place des chiffres de référence.
+  // Toujours affiché (même à 0) : c'est le lien visible entre le formulaire de saisie et la carte.
   function supplementReelHtml(culture) {
-    const t = totauxRegion(culture);
-    if (!t.nb) return '';
-    return `<div class="dash-row" style="margin-top:6px; padding-top:6px; border-top:1px dashed var(--line);">` +
-      `<span class="dash-label">Terrain (Supabase)</span><span class="dash-value">${fmt(t.nb)} parcelle(s)</span></div>` +
+    const cultures = culture === 'toutes' ? ['riz', 'manioc', 'igname'] : [culture];
+    const t = cultures.reduce((a, c) => {
+      const r = totauxRegion(c);
+      a.nb += r.nb; a.surface += r.surface;
+      return a;
+    }, { nb: 0, surface: 0 });
+    const sep = 'margin-top:6px; padding-top:6px; border-top:1px dashed var(--line);';
+    if (terrainStatus === 'error') {
+      return `<div class="dash-row" style="${sep}"><span class="dash-label">Parcelles réelles (terrain)</span><span class="dash-value">indisponible</span></div>` +
+        `<div class="dash-note">Connexion à la base Supabase impossible pour le moment (réseau ?). Réessayez en rechargeant la page.</div>`;
+    }
+    if (terrainStatus === 'pending') {
+      return `<div class="dash-row" style="${sep}"><span class="dash-label">Parcelles réelles (terrain)</span><span class="dash-value">chargement…</span></div>`;
+    }
+    if (!t.nb) {
+      return `<div class="dash-row" style="${sep}"><span class="dash-label">Parcelles réelles (terrain)</span><span class="dash-value">0</span></div>` +
+        `<div class="dash-note">Les cellules vertes sont simulées. Les parcelles saisies dans le formulaire apparaissent ici (contour épais) après synchronisation.</div>`;
+    }
+    return `<div class="dash-row" style="${sep}"><span class="dash-label">Parcelles réelles (terrain)</span><span class="dash-value">${fmt(t.nb)}</span></div>` +
       `<div class="dash-row"><span class="dash-label">└ Superficie mesurée</span><span class="dash-value">${fmt(t.surface)} ha</span></div>`;
   }
 
@@ -712,7 +742,7 @@ function getMergedCulture(culture) {
         <div class="dash-row"><span class="dash-label">Manioc</span><span class="dash-value">${fmt(DATA.manioc.production)} t</span></div>
         <div class="dash-row"><span class="dash-label">Igname</span><span class="dash-value">${fmt(DATA.igname.production)} t</span></div>
         <div class="dash-note">Cliquez sur une parcelle pour le détail — cellule ≈ 36 ha</div>
-      `;
+      ` + supplementReelHtml('toutes');
       return;
     }
     const info = DATA[currentCulture];
@@ -945,8 +975,11 @@ function getMergedCulture(culture) {
   // 2) Enrichissement asynchrone avec les données réelles Supabase, une fois disponibles —
   //    ne redéclenche jamais fitBounds (pas de saut de zoom une fois la carte affichée).
   chargerDonnees().then(() => {
+    terrainStatus = 'ok';
     render(false);
   }).catch(err => {
+    terrainStatus = 'error';
+    showRegionTotals();
     console.warn('Supabase indisponible pour le moment — la carte reste sur les données de référence (Annuaire 2022-2023 / grille de simulation) :', err.message);
   });
 
