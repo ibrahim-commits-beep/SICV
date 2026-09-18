@@ -82,6 +82,15 @@
     font-size: 0.8rem;
     opacity: 0.85;
   }
+  /* Liens de navigation du site publié (Accueil / formulaire) — insérés à la publication */
+  .site-nav a {
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-decoration: underline;
+    margin-left: 14px;
+  }
+  .site-nav a:first-child { margin-left: 0; }
   #map {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
@@ -280,7 +289,45 @@
 
   #mobile-controls, #bottom-controls { display: contents; }
 
-  @media (max-width: 640px) {
+  /* Petits écrans : téléphone en portrait (largeur ≤ 640 px) OU en paysage (hauteur ≤ 500 px).
+     Objectif : laisser la carte visible. En-tête compact, tableau de bord / légende / bandeau
+     d'avertissement repliés par défaut (un appui les déplie — cf. script en bas de page). */
+  @media (max-width: 640px), (max-height: 500px) {
+    header { padding: 8px 12px; gap: 4px; }
+    header h1 { font-size: 0.86rem; }
+    header .sub { display: none; }
+    .site-nav a { font-size: 0.74rem; margin-left: 10px; }
+
+    #dashboard { padding: 8px 12px; font-size: 0.78rem; }
+    #dashboard .dash-title { margin-bottom: 0; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    #dashboard .dash-title::after { content: '▾'; font-size: 0.8rem; }
+    #dashboard.collapsed .dash-title::after { content: '▸'; }
+    #dashboard:not(.collapsed) .dash-title { margin-bottom: 6px; }
+    #dashboard.collapsed #dash-content { display: none; }
+
+    #test-banner { padding: 6px 10px; font-size: 0.7rem; cursor: pointer; }
+    #test-banner:not(.open) .banner-more { display: none; }
+    #test-banner:not(.open)::after { content: ' — appuyez pour les détails'; text-decoration: underline; }
+
+    #legend-toggle { padding: 6px 10px; }
+    .dept-label { font-size: 11px; }
+    /* L'attribution Leaflet (obligatoire) passe sur 2 lignes sur téléphone : on la réduit et on
+       remonte les panneaux du bas pour qu'elle ne recouvre pas la légende. */
+    .leaflet-control-attribution { font-size: 9px; }
+    #bottom-controls { bottom: 34px !important; }
+  }
+
+  /* Téléphone en paysage : peu de hauteur -> commandes côte à côte plutôt qu'empilées */
+  @media (max-height: 500px) and (min-width: 641px) {
+    #mobile-controls { flex-direction: row !important; align-items: flex-start; }
+    #mobile-controls #mode-selector { flex: 0 0 auto; }
+    #mobile-controls #dashboard { flex: 1 1 auto; max-height: 45vh; }
+    #bottom-controls { flex-direction: row !important; align-items: flex-end; }
+    #bottom-controls #test-banner { flex: 1 1 auto; }
+    #bottom-controls #legend { flex: 0 0 auto; max-width: 260px; }
+  }
+
+  @media (max-width: 640px), (max-height: 500px) {
     /* Écran étroit : le zoom tactile (pincer) remplace les boutons +/- pour libérer la place */
     .leaflet-control-zoom { display: none; }
     .leaflet-control-home { display: none; }
@@ -347,7 +394,7 @@
 <div id="app">
   <header>
     <h1>Système d'Information des Cultures Vivrières — Prototype</h1>
-    <div class="sub">Riz, Manioc, Igname · Région du Gbêkê · Données OpenStreetMap / Annuaires agricoles · <a href="index.html" style="color:#fff; font-weight:700; text-decoration:underline; margin-left:6px;">Accueil</a> <a href="formulaire.html" style="color:#fff; font-weight:700; text-decoration:underline; margin-left:6px;">Saisie terrain →</a></div>
+    <div class="sub">Riz, Manioc, Igname · Région du Gbêkê · Données OpenStreetMap / Annuaires agricoles</div><nav class="site-nav"><a href="index.html">Accueil</a><a href="formulaire.html">Saisie terrain →</a></nav>
   </header>
   <div style="position: relative; flex: 1; min-height: 0;">
     <div id="map"></div>
@@ -369,7 +416,7 @@
     </div>
     <div id="bottom-controls">
       <div id="test-banner" style="display: none;">
-        <strong>⚠ Données de test</strong> — la grille de parcelles est générée par simulation (aucune image satellite réelle n'est encore disponible). Les surfaces départementales du riz sont réelles ; la répartition spatiale et les surfaces de manioc/igname sont des hypothèses de travail, à remplacer en Phase 2. Les parcelles au contour épais et foncé sont des <strong>mesures réelles</strong> collectées sur le terrain (base Supabase).
+        <strong>⚠ Données de test</strong><span class="banner-more"> — la grille de parcelles est générée par simulation (aucune image satellite réelle n'est encore disponible). Les surfaces départementales du riz sont réelles ; la répartition spatiale et les surfaces de manioc/igname sont des hypothèses de travail, à remplacer en Phase 2. Les parcelles au contour épais et foncé sont des <strong>mesures réelles</strong> collectées sur le terrain (base Supabase).</span>
       </div>
       <div id="legend">
         <button id="legend-toggle" type="button" aria-expanded="true" aria-controls="legend-body">
@@ -416,7 +463,13 @@
 
   // Marge réutilisée par tous les fitBounds() de la carte, pour que les contours ne touchent
   // jamais le bord de la fenêtre.
-  const FIT_PADDING = { padding: [20, 20] };
+  // Sur téléphone, les panneaux (mode, tableau de bord, légende) recouvrent le haut et le bas de la
+  // carte : on décale le cadrage pour que la région reste centrée dans la zone réellement visible.
+  const FIT_PADDING = window.matchMedia('(max-width: 640px)').matches
+    ? { paddingTopLeft: [10, 110], paddingBottomRight: [10, 80] }
+    : window.matchMedia('(max-height: 500px)').matches
+      ? { paddingTopLeft: [10, 60], paddingBottomRight: [10, 50] }
+      : { padding: [20, 20] };
 
   // Fond de carte sans les labels (routes/localités) : les labels sont ajoutés séparément plus bas,
   // dans leur propre pane, pour rester lisibles au-dessus des polygones colorés (voir gridPane/labelsPane).
@@ -709,6 +762,9 @@ function getMergedCulture(culture) {
   }
 
   function updateDashboard(zoneName, info) {
+    // Petits écrans : le détail d'une zone touchée s'affiche directement (panneau déplié)
+    document.getElementById('dashboard').classList.remove('collapsed');
+    collapseOthers('dashboard');
     const dashEl = document.getElementById('dash-content');
     if (info.granularite === 'departement') {
       dashEl.innerHTML = `
@@ -907,6 +963,37 @@ function getMergedCulture(culture) {
   legendToggle.addEventListener('click', () => {
     const collapsed = legendEl.classList.toggle('collapsed');
     legendToggle.setAttribute('aria-expanded', String(!collapsed));
+  });
+
+  // Petits écrans (téléphone portrait ou paysage) : tableau de bord et légende repliés au départ,
+  // bandeau d'avertissement réduit à une ligne — un appui les déplie (cf. CSS @media plus haut).
+  const compactScreenQuery = window.matchMedia('(max-width: 640px), (max-height: 500px)');
+  const dashboardEl = document.getElementById('dashboard');
+  const testBannerEl = document.getElementById('test-banner');
+  if (compactScreenQuery.matches) {
+    dashboardEl.classList.add('collapsed');
+    legendEl.classList.add('collapsed');
+    legendToggle.setAttribute('aria-expanded', 'false');
+  }
+  // Un seul panneau ouvert à la fois sur petit écran : ouvrir l'un referme les deux autres.
+  function collapseOthers(keep) {
+    if (!compactScreenQuery.matches) return;
+    if (keep !== 'dashboard') dashboardEl.classList.add('collapsed');
+    if (keep !== 'banner') testBannerEl.classList.remove('open');
+    if (keep !== 'legend') { legendEl.classList.add('collapsed'); legendToggle.setAttribute('aria-expanded', 'false'); }
+  }
+  dashboardEl.querySelector('.dash-title').addEventListener('click', () => {
+    if (!compactScreenQuery.matches) return;
+    dashboardEl.classList.toggle('collapsed');
+    if (!dashboardEl.classList.contains('collapsed')) collapseOthers('dashboard');
+  });
+  testBannerEl.addEventListener('click', () => {
+    if (!compactScreenQuery.matches) return;
+    testBannerEl.classList.toggle('open');
+    if (testBannerEl.classList.contains('open')) collapseOthers('banner');
+  });
+  legendToggle.addEventListener('click', () => {
+    if (!legendEl.classList.contains('collapsed')) collapseOthers('legend');
   });
 
   // --- Enrichissement en arrière-plan : parcelles réelles + agrégats terrain (Supabase) -------
